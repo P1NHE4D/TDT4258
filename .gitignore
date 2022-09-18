@@ -1,4 +1,2 @@
-cmake-build-debug/
-cache_sim
 .idea/
-
+cmake-build-debug/
