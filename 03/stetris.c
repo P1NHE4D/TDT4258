@@ -61,10 +61,15 @@ gameConfig game = {
         .initNextGameTick = 50,
 };
 
-int fb = 0;
-unsigned char* fb_data;
+int led_fd = 0;
+int joystick_fd = 0;
+unsigned char* led_fb_data;
 struct fb_fix_screeninfo screen_info;
 int pixel_offset = 2;
+struct input_event joystick_event;
+struct timeval timeval;
+u_int16_t timeout = 175;
+u_int64_t last_read = 0;
 
 
 // This function is called on the start of your application
@@ -73,14 +78,15 @@ int pixel_offset = 2;
 bool initializeSenseHat() {
 
     // open framebuffer
-    fb = open("/dev/fb0", O_RDWR);
-    if (fb == -1) {
+    led_fd = open("/dev/fb0", O_RDWR);
+    if (led_fd == -1) {
         printf("Failed to open frame buffer\n");
         return false;
     }
 
+
     // get fixed screen info for opened frame buffer
-    if (ioctl(fb, FBIOGET_FSCREENINFO, &screen_info) != 0) {
+    if (ioctl(led_fd, FBIOGET_FSCREENINFO, &screen_info) < 0) {
         printf("Could not read screen info\n");
         return false;
     }
@@ -91,7 +97,26 @@ bool initializeSenseHat() {
         return false;
     }
     // map virtual address space of the sense hat to memory
-    fb_data = mmap(NULL, screen_info.smem_len, PROT_READ | PROT_EXEC | PROT_WRITE, MAP_SHARED, fb, 0);
+    led_fb_data = mmap(NULL, screen_info.smem_len, PROT_READ | PROT_EXEC | PROT_WRITE, MAP_SHARED, led_fd, 0);
+
+    // open joystick event file
+    joystick_fd = open("/dev/input/event0", O_RDONLY);
+    if (joystick_fd == -1) {
+        printf("Could not open joystick event file\n");
+        return false;
+    }
+
+    // get name of event device
+    char name[128];
+    if (ioctl(joystick_fd, EVIOCGNAME(sizeof(name)), &name) < 0) {
+        printf("Could not read event input device name\n");
+        return false;
+    }
+
+    if (strcmp(name, "Raspberry Pi Sense HAT Joystick") != 0) {
+        printf("Could not find Raspberry Pi Sense HAT Joystick\n");
+        return false;
+    }
 
     return true;
 }
@@ -101,13 +126,13 @@ bool initializeSenseHat() {
 void freeSenseHat() {
 
     // clear sense hat at the end of the game
-    memset(fb_data, 0, screen_info.smem_len);
+    memset(led_fb_data, 0, screen_info.smem_len);
 
     // unmap the virtual address space from the sense hat
-    munmap(fb_data, screen_info.smem_len);
+    munmap(led_fb_data, screen_info.smem_len);
 
     // close framebuffer file
-    close(fb);
+    close(led_fd);
 }
 
 // This function should return the key that corresponds to the joystick press
@@ -115,6 +140,19 @@ void freeSenseHat() {
 // and KEY_ENTER, when the the joystick is pressed
 // !!! when nothing was pressed you MUST return 0 !!!
 int readSenseHatJoystick() {
+    struct pollfd pollJoystick = {
+        .fd = joystick_fd,
+        .events = POLLIN
+    };
+    if (poll(&pollJoystick, 1, 0)) {
+        read(joystick_fd, &joystick_event, sizeof(joystick_event));
+
+        gettimeofday(&timeval, NULL);
+        if ((timeval.tv_sec * 1000LL + timeval.tv_usec / 1000) - last_read > timeout) {
+            last_read = (timeval.tv_sec * 1000LL + timeval.tv_usec / 1000);
+            return joystick_event.code;
+        }
+    }
     return 0;
 }
 
@@ -128,14 +166,14 @@ void renderSenseHatMatrix(bool const playfieldChanged) {
     // only update the sense hat if the playing field changed
     if (playfieldChanged) {
         // clear the entire screen
-        memset(fb_data, 0, screen_info.smem_len);
+        memset(led_fb_data, 0, screen_info.smem_len);
 
         // set the pixels corresponding to the occupied cells
         for (int row = 0; row < game.grid.y; row++) {
             for (int col = 0; col < game.grid.x; col++) {
                 if (game.playfield[row][col].occupied) {
                     // each pixel occupies 2 bytes of the address space and each row has 8 pixels
-                    fb_data[row * 8 * pixel_offset + col * pixel_offset] = 255;
+                    led_fb_data[row * 8 * pixel_offset + col * pixel_offset] = 255;
                 }
             }
         }
