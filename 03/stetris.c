@@ -61,14 +61,14 @@ gameConfig game = {
         .initNextGameTick = 50,
 };
 
-int led_fd = 0;
-int joystick_fd = 0;
-unsigned char* led_fb_data;
-struct fb_fix_screeninfo screen_info;
+int led_fd = 0;     // led file descriptor
+int joystick_fd = 0;    // joystick file descriptor
+unsigned char* led_fb_data;     // led framebuffer data
+struct fb_fix_screeninfo screen_info;   // led framebuffer info
 int pixel_offset = 2;
-struct input_event joystick_event;
-struct timeval timeval;
-u_int16_t timeout = 175;
+struct input_event joystick_event;  // joystick event buffer
+struct timeval timeval;     // timeval object for timeouts to improve user controls (see below)
+u_int16_t timeout = 175;    // timeout until next joystick input is read
 u_int64_t last_read = 0;
 
 
@@ -144,9 +144,14 @@ int readSenseHatJoystick() {
         .fd = joystick_fd,
         .events = POLLIN
     };
+
+    // check if a new joystick event is present
     if (poll(&pollJoystick, 1, 0)) {
+
+        // read the event if present, otherwise a queue will form
         read(joystick_fd, &joystick_event, sizeof(joystick_event));
 
+        // only return the joystick event if the timeout has passed. This improves controllability
         gettimeofday(&timeval, NULL);
         if ((timeval.tv_sec * 1000LL + timeval.tv_usec / 1000) - last_read > timeout) {
             last_read = (timeval.tv_sec * 1000LL + timeval.tv_usec / 1000);
