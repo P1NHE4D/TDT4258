@@ -61,37 +61,53 @@ gameConfig game = {
         .initNextGameTick = 50,
 };
 
+int fb = 0;
+unsigned char* fb_data;
+struct fb_fix_screeninfo screen_info;
+int pixel_offset = 2;
+
 
 // This function is called on the start of your application
 // Here you can initialize what ever you need for your task
 // return false if something fails, else true
 bool initializeSenseHat() {
-    int fb = 0;
+
+    // open framebuffer
     fb = open("/dev/fb0", O_RDWR);
     if (fb == -1) {
         printf("Failed to open frame buffer\n");
-        exit(-1);
+        return false;
     }
-    struct fb_fix_screeninfo screen_info;
+
+    // get fixed screen info for opened frame buffer
     if (ioctl(fb, FBIOGET_FSCREENINFO, &screen_info) != 0) {
         printf("Could not read screen info\n");
-        exit(-1);
+        return false;
     }
-    printf("ID: %s\n", screen_info.id);
-    printf("Start of frame buffer mem: %llu\n", screen_info.smem_start);
-    printf("Length of frame buffer mem: %d\n", screen_info.smem_len);
-    printf("Type: %d\n", screen_info.type);
-    if (strcmp(screen_info.id, "RPi-Sense FB")) {
+
+    // check if id of the framebuffer corresponds to RPi-Sense FB
+    if (strcmp(screen_info.id, "RPi-Sense FB") != 0) {
         printf("Could not find RPi-Sense FB\n");
-        exit(-1);
+        return false;
     }
-    return false;
+    // map virtual address space of the sense hat to memory
+    fb_data = mmap(NULL, screen_info.smem_len, PROT_READ | PROT_EXEC | PROT_WRITE, MAP_SHARED, fb, 0);
+
+    return true;
 }
 
 // This function is called when the application exits
 // Here you can free up everything that you might have opened/allocated
 void freeSenseHat() {
 
+    // clear sense hat at the end of the game
+    memset(fb_data, 0, screen_info.smem_len);
+
+    // unmap the virtual address space from the sense hat
+    munmap(fb_data, screen_info.smem_len);
+
+    // close framebuffer file
+    close(fb);
 }
 
 // This function should return the key that corresponds to the joystick press
@@ -108,6 +124,22 @@ int readSenseHatJoystick() {
 // has changed the playfield
 void renderSenseHatMatrix(bool const playfieldChanged) {
     (void) playfieldChanged;
+
+    // only update the sense hat if the playing field changed
+    if (playfieldChanged) {
+        // clear the entire screen
+        memset(fb_data, 0, screen_info.smem_len);
+
+        // set the pixels corresponding to the occupied cells
+        for (int row = 0; row < game.grid.y; row++) {
+            for (int col = 0; col < game.grid.x; col++) {
+                if (game.playfield[row][col].occupied) {
+                    // each pixel occupies 2 bytes of the address space and each row has 8 pixels
+                    fb_data[row * 8 * pixel_offset + col * pixel_offset] = 255;
+                }
+            }
+        }
+    }
 }
 
 
