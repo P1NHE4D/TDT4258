@@ -19,11 +19,21 @@
 #define ACTIVE     (1 << 0)
 #define ROW_CLEAR  (1 << 1)
 #define TILE_ADDED (1 << 2)
+#define RED 0b1111100000000000
+#define BLUE 0b0000000000011111
+#define GREEN (u_int16_t) ~(RED | BLUE)
+#define YELLOW (GREEN | RED)
+#define WHITE 0xFFFF
+#define PINK (RED | BLUE)
+#define CYAN (GREEN | BLUE)
+#define ORANGE 0xFBC0
+#define PURPLE 0x9215
 
 // If you extend this structure, either avoid pointers or adjust
 // the game logic allocate/deallocate and reset the memory
 typedef struct {
     bool occupied;
+    u_int16_t color;
 } tile;
 
 typedef struct {
@@ -63,14 +73,21 @@ gameConfig game = {
 
 int led_fd = 0;     // led file descriptor
 int joystick_fd = 0;    // joystick file descriptor
-unsigned char* led_fb_data;     // led framebuffer data
+u_int16_t * led_fb_data;     // led framebuffer data
 struct fb_fix_screeninfo screen_info;   // led framebuffer info
-int pixel_offset = 2;
 struct input_event joystick_event;  // joystick event buffer
 struct timeval timeval;     // timeval object for timeouts to improve user controls (see below)
 u_int16_t timeout = 175;    // timeout until next joystick input is read
 u_int64_t last_read = 0;
+const u_int16_t colors[] = {RED, BLUE, GREEN, YELLOW, ORANGE, PURPLE, CYAN, PINK, WHITE };
+u_int8_t current_color = 0;
 
+// picks a color based on the predefined color array
+u_int16_t pick_color() {
+    u_int16_t picked_color = colors[current_color];
+    current_color = (current_color + 1) % 9;
+    return picked_color;
+}
 
 // This function is called on the start of your application
 // Here you can initialize what ever you need for your task
@@ -177,8 +194,8 @@ void renderSenseHatMatrix(bool const playfieldChanged) {
         for (int row = 0; row < game.grid.y; row++) {
             for (int col = 0; col < game.grid.x; col++) {
                 if (game.playfield[row][col].occupied) {
-                    // each pixel occupies 2 bytes of the address space and each row has 8 pixels
-                    led_fb_data[row * 8 * pixel_offset + col * pixel_offset] = 255;
+                    // turn on the corresponding pixel on the sense hat
+                    led_fb_data[row * 8 + col] = game.playfield[row][col].color;
                 }
             }
         }
@@ -192,6 +209,7 @@ void renderSenseHatMatrix(bool const playfieldChanged) {
 
 static inline void newTile(coord const target) {
     game.playfield[target.y][target.x].occupied = true;
+    game.playfield[target.y][target.x].color = pick_color();
 }
 
 static inline void copyTile(coord const to, coord const from) {
